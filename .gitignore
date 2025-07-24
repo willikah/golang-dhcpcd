@@ -1,0 +1,44 @@
+
+# Go build and cache
+/bin/
+/build/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go modules
+/go.sum
+/go.mod
+
+# IDE/editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Generated git info
+/internal/pkg/version/commit.txt
+/internal/pkg/version/branch.txt
+/internal/pkg/version/tag.txt
+/internal/pkg/version/dirty.txt
+
+# Logs
+*.log
+
+# Coverage
+coverage*
+*.coverprofile
+
+# Misc
+*.tmp
+*.cache

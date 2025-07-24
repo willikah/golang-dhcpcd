@@ -1,0 +1,61 @@
+services:
+  dhcpd:
+    image: networkboot/dhcpd:latest
+    # Remove external port mapping to avoid conflicts
+    # ports:
+    #   - "6767:67/udp"
+    volumes:
+      - ./dhcpd.conf:/data/dhcpd.conf
+    networks:
+      - dhcp_net
+      - static_net
+    environment:
+      - INTERFACES=eth0
+    privileged: true
+  
+  # First golang-dhcpcd client: DHCP on eth0, Static on eth1
+  client-1:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    volumes:
+      - ./golang-dhcpcd-1.yml:/app/golang-dhcpcd.yml
+    command: ["serve", "-f", "/app/golang-dhcpcd.yml"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      - dhcp_net
+      - static_net
+
+  # Second golang-dhcpcd client: DHCP on eth0, Static on eth1  
+  client-2:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile
+    volumes:
+      - ./golang-dhcpcd-2.yml:/app/golang-dhcpcd.yml
+    command: ["serve", "-f", "/app/golang-dhcpcd.yml"]
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    networks:
+      - dhcp_net
+      - static_net
+
+networks:
+  dhcp_net:
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+          gateway: 192.168.100.1
+  
+  static_net:
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 192.168.101.0/24
+          gateway: 192.168.101.1

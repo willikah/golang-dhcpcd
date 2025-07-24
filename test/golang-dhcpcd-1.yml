@@ -1,0 +1,13 @@
+logging:
+  level: debug
+  format: simple
+
+interfaces:
+  eth0:
+    dhcp: true
+  eth1:
+    dhcp: false
+    static:
+      ip: 192.168.101.10
+      netmask: 255.255.255.0
+      gateway: 192.168.101.1
