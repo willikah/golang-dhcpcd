@@ -7,7 +7,7 @@ toolchain go1.24.1
 require (
 	github.com/insomniacslk/dhcp v0.0.0-20250417080101-5f8cf70e8c5f
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spf13/cobra v1.8.0
+	github.com/spf13/cobra v1.9.1
 	github.com/vishvananda/netlink v1.3.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -21,7 +21,7 @@ require (
 	github.com/mdlayher/socket v0.4.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.14 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/u-root/uio v0.0.0-20230220225925-ffce2a382923 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
