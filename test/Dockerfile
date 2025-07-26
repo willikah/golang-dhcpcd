@@ -2,6 +2,7 @@
 FROM golang:1.23-alpine AS builder
 WORKDIR /app
 COPY .. .
+RUN go generate ./...
 RUN go build -o golang-dhcpcd main.go
 
 FROM alpine:latest

@@ -71,7 +71,9 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().StringVarP(&configFlag, "config", "f", "", "Path to config file (YAML)")
-	serveCmd.MarkFlagRequired("config")
+	if err := serveCmd.MarkFlagRequired("config"); err != nil {
+		panic(err) // This should never happen during initialization
+	}
 	rootCmd.AddCommand(serveCmd)
 }
 

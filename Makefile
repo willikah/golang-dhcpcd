@@ -16,7 +16,7 @@ SRC := $(shell find . -type f -name '*.go' -not -path './vendor/*')
 VERSION := $(shell git describe --tags --always --dirty)
 BUILD_DIR := build
 
-.PHONY: all build run test lint clean fmt vet deps install generate help
+.PHONY: all build run test test-integration test-all lint clean fmt vet deps install generate help
 
 all: build
 
@@ -32,12 +32,21 @@ run: build
 test:
 	go test ./...
 
+test-integration: docker-build
+	@echo "Running integration tests..."
+	go test -v ./test -tags=integration
+	@echo "Integration tests completed"
+
+test-all: test test-integration
+	@echo "All tests completed"
+
 lint:
 	golangci-lint run ./...
 
 clean:
 	rm -rf $(BUILD_DIR)/*
-.PHONY: up logs down docker-build check-conflicts
+
+.PHONY: up logs down docker-build up-d
 
 docker-build:
 	cd test && docker compose build
@@ -45,29 +54,11 @@ docker-build:
 up:
 	cd test && docker compose up
 
+up-d:
+	cd test && docker compose up -d
+
 down:
 	cd test && docker compose down --remove-orphans
-
-check-conflicts:
-	@echo "=== Checking for Network Address Conflicts ==="
-	@echo "\n1. Current System Networks:"
-	@ip route show | grep -E "172\.|192\.168\.|10\." || echo "No conflicting routes found"
-	@echo "\n2. Current Docker Networks:"
-	@docker network ls --format "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"
-	@echo "\n3. Docker Network Details:"
-	@docker network inspect bridge --format '{{range .IPAM.Config}}Subnet: {{.Subnet}}{{end}}' 2>/dev/null || echo "No bridge network details"
-	@echo "\n4. Planned Docker Compose Networks:"
-	@echo "   dhcp_net: 192.168.100.0/24 (Gateway: 192.168.100.1)"
-	@echo "   static_net: 192.168.101.0/24 (Gateway: 192.168.101.1)"
-	@echo "\n5. Conflict Analysis:"
-	@if ip route show | grep -q "192\.168\.100\.\|192\.168\.101\."; then \
-		echo "⚠️  CONFLICT DETECTED: 192.168.100.x or 192.168.101.x networks already exist!"; \
-		ip route show | grep "192\.168\.100\.\|192\.168\.101\."; \
-	else \
-		echo "✅ No conflicts detected - 192.168.100.x and 192.168.101.x networks are available"; \
-	fi
-	@echo "\n6. System Interface Check:"
-	@ip addr show | grep -E "inet 192\.168\.(100|101)\." && echo "⚠️  Interface conflict detected!" || echo "✅ No interface conflicts"
 
 logs:
 	cd test && docker compose logs -f client
@@ -75,7 +66,7 @@ logs:
 fmt:
 	go fmt ./...
 
-vet:
+vet: generate
 	go vet ./...
 
 deps:
@@ -88,7 +79,9 @@ help:
 	@echo "Available targets:"
 	@echo "  build           Build the binary"
 	@echo "  run             Run the application"
-	@echo "  test            Run tests"
+	@echo "  test            Run unit tests"
+	@echo "  test-integration Run integration tests (requires Docker)"
+	@echo "  test-all        Run all tests (unit + integration)"
 	@echo "  lint            Run golangci-lint (auto-installs if missing)"
 	@echo "  clean           Remove build artifacts"
 	@echo "  fmt             Format code"
@@ -100,4 +93,3 @@ help:
 	@echo "  up              Start docker-compose"
 	@echo "  down            Stop docker-compose"
 	@echo "  logs            View client logs"
-	@echo "  check-conflicts Check for network address conflicts"
