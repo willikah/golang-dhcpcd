@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 1.24.x
+    
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Run tests
+      run: go test ./...
+    
+    - name: Build binaries
+      run: |
+        # Build for different platforms
+        GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o build/golang-dhcpcd-linux-amd64 main.go
+        GOOS=linux GOARCH=arm64 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o build/golang-dhcpcd-linux-arm64 main.go
+        GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o build/golang-dhcpcd-darwin-amd64 main.go
+        GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o build/golang-dhcpcd-darwin-arm64 main.go
+        GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=${GITHUB_REF_NAME}" -o build/golang-dhcpcd-windows-amd64.exe main.go
+        
+        # Make binaries executable
+        chmod +x build/golang-dhcpcd-*
+        
+        # List built artifacts
+        ls -la build/
+    
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "## Changes" > CHANGELOG.md
+        git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --pretty=format:"- %s" >> CHANGELOG.md
+        cat CHANGELOG.md
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          build/golang-dhcpcd-linux-amd64
+          build/golang-dhcpcd-linux-arm64
+          build/golang-dhcpcd-darwin-amd64
+          build/golang-dhcpcd-darwin-arm64
+          build/golang-dhcpcd-windows-amd64.exe
+        body_path: CHANGELOG.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

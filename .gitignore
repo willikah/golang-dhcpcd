@@ -11,10 +11,6 @@
 *.test
 *.out
 
-# Go modules
-/go.sum
-/go.mod
-
 # IDE/editor files
 .vscode/
 .idea/
