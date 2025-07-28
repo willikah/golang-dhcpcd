@@ -1,9 +1,6 @@
 services:
   dhcpd:
     image: networkboot/dhcpd:latest
-    # Remove external port mapping to avoid conflicts
-    # ports:
-    #   - "6767:67/udp"
     volumes:
       - ./dhcpd.conf:/data/dhcpd.conf
     networks:
@@ -17,13 +14,15 @@ services:
   client-1:
     build:
       context: ..
-      dockerfile: test/Dockerfile
+      dockerfile: Dockerfile
     volumes:
       - ./golang-dhcpcd-1.yml:/app/golang-dhcpcd.yml
     command: ["serve", "-f", "/app/golang-dhcpcd.yml"]
+    privileged: true
     cap_add:
       - NET_ADMIN
       - NET_RAW
+      - SYS_ADMIN
     networks:
       - dhcp_net
       - static_net
@@ -32,13 +31,15 @@ services:
   client-2:
     build:
       context: ..
-      dockerfile: test/Dockerfile
+      dockerfile: Dockerfile
     volumes:
       - ./golang-dhcpcd-2.yml:/app/golang-dhcpcd.yml
     command: ["serve", "-f", "/app/golang-dhcpcd.yml"]
+    privileged: true
     cap_add:
       - NET_ADMIN
       - NET_RAW
+      - SYS_ADMIN
     networks:
       - dhcp_net
       - static_net

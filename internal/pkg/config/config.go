@@ -11,7 +11,7 @@ import (
 
 // InterfaceConfig represents the configuration for a network interface
 type InterfaceConfig struct {
-	DHCP   bool          `yaml:"dhcp"`
+	DHCP   bool          `yaml:"dhcp,omitempty"`
 	Static *StaticConfig `yaml:"static,omitempty"`
 }
 

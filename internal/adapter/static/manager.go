@@ -1,105 +1,97 @@
 package static
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
 	"time"
 
+	"golang-dhcpcd/internal/pkg/config"
 	"golang-dhcpcd/internal/pkg/logging"
+	"golang-dhcpcd/internal/port"
+	"golang-dhcpcd/internal/types"
 
 	"github.com/vishvananda/netlink"
 )
 
-// Client handles static IP configuration for a network interface.
-type Client struct {
-	Iface *net.Interface
+// Manager is a static IP network configuration adapter that implements the NetworkConfigurationManager port.
+// It handles static IP configuration for a network interface following the Ports and Adapters pattern.
+type Manager struct {
+	iface        *net.Interface
+	config       config.InterfaceConfig
+	staticConfig types.StaticIPConfig
+	networkMgr   port.NetworkManager
 }
 
-// Config represents static IP configuration parameters.
-type Config struct {
-	IPAddress string `yaml:"ip"`
-	Netmask   string `yaml:"netmask"`
-	Gateway   string `yaml:"gateway"`
-}
+// Ensure Manager implements the NetworkConfigurationManager port
+var _ port.NetworkConfigurationManager = (*Manager)(nil)
 
-// NewClient creates a new static IP client for the given interface name.
-func NewClient(ifaceName string) (*Client, error) {
+// NewManager creates a new static IP network configuration adapter for the given interface name and configuration.
+func NewManager(ifaceName string, ifaceConfig config.InterfaceConfig, networkMgr port.NetworkManager) (*Manager, error) {
 	iface, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("interface not found: %w", err)
 	}
-	return &Client{Iface: iface}, nil
+
+	if ifaceConfig.Static == nil {
+		return nil, fmt.Errorf("interface configuration does not have static IP settings")
+	}
+
+	// Convert config.StaticConfig to types.StaticIPConfig
+	staticConfig := types.StaticIPConfig{
+		IPAddress: ifaceConfig.Static.IP,
+		Netmask:   ifaceConfig.Static.Netmask,
+		Gateway:   ifaceConfig.Static.Gateway,
+	}
+
+	// Validate configuration at creation time
+	manager := &Manager{
+		iface:        iface,
+		config:       ifaceConfig,
+		staticConfig: staticConfig,
+		networkMgr:   networkMgr,
+	}
+	return manager, nil
+}
+
+// GetInterfaceName returns the name of the network interface managed by this manager.
+func (m *Manager) GetInterfaceName() string {
+	return m.iface.Name
 }
 
 // Run configures the interface with static IP settings and maintains the configuration.
-func (c *Client) Run(config Config) error {
-	logger := logging.WithComponentAndInterface("static", c.Iface.Name).WithField("mac", c.Iface.HardwareAddr.String())
+// It runs until the context is cancelled. This method implements the NetworkConfigurationManager port.
+func (m *Manager) Run(ctx context.Context) error {
+	logger := logging.WithComponentAndInterface("static", m.iface.Name).WithField("mac", m.iface.HardwareAddr.String())
 	logger.Info("Starting static IP configuration")
 
-	// Validate configuration
-	if err := c.validateConfig(config); err != nil {
-		return fmt.Errorf("invalid static configuration: %w", err)
-	}
-
 	// Apply static IP configuration
-	if err := c.applyStaticConfig(config); err != nil {
+	if err := m.applyStaticConfig(ctx, m.staticConfig); err != nil {
 		return fmt.Errorf("failed to apply static configuration: %w", err)
 	}
 
 	logger.WithFields(map[string]interface{}{
-		"ip":      config.IPAddress,
-		"netmask": config.Netmask,
-		"gateway": config.Gateway,
+		"ip":      m.staticConfig.IPAddress,
+		"netmask": m.staticConfig.Netmask,
+		"gateway": m.staticConfig.Gateway,
 	}).Info("Static IP configuration applied successfully")
 
 	// Monitor interface status and reapply configuration if needed
-	return c.monitorInterface(config)
-}
-
-// validateConfig validates the static IP configuration parameters.
-func (c *Client) validateConfig(config Config) error {
-	// Validate IP address
-	ip := net.ParseIP(config.IPAddress)
-	if ip == nil {
-		return fmt.Errorf("invalid IP address: %s", config.IPAddress)
-	}
-	if ip.To4() == nil {
-		return fmt.Errorf("only IPv4 addresses are supported: %s", config.IPAddress)
-	}
-
-	// Validate netmask
-	mask := net.ParseIP(config.Netmask)
-	if mask == nil {
-		return fmt.Errorf("invalid netmask: %s", config.Netmask)
-	}
-	if mask.To4() == nil {
-		return fmt.Errorf("only IPv4 netmasks are supported: %s", config.Netmask)
-	}
-
-	// Validate gateway
-	if config.Gateway != "" {
-		gw := net.ParseIP(config.Gateway)
-		if gw == nil {
-			return fmt.Errorf("invalid gateway address: %s", config.Gateway)
-		}
-		if gw.To4() == nil {
-			return fmt.Errorf("only IPv4 gateway addresses are supported: %s", config.Gateway)
-		}
-	}
-
-	return nil
+	return m.monitorInterface(ctx, m.staticConfig)
 }
 
 // applyStaticConfig applies the static IP configuration to the interface using netlink.
-func (c *Client) applyStaticConfig(config Config) error {
-	logger := logging.WithComponentAndInterface("static", c.Iface.Name)
+func (m *Manager) applyStaticConfig(ctx context.Context, config types.StaticIPConfig) error {
+	logger := logging.WithComponentAndInterface("static", m.iface.Name)
 
-	// Get netlink interface
-	link, err := netlink.LinkByName(c.Iface.Name)
+	// Get netlink interface using network manager port
+	link, err := m.networkMgr.GetLinkByName(m.iface.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get netlink interface: %w", err)
-	} // Parse IP address and netmask
+	}
+
+	// Parse IP address and netmask
 	ip := net.ParseIP(config.IPAddress)
 	if ip == nil {
 		return fmt.Errorf("invalid IP address: %s", config.IPAddress)
@@ -119,7 +111,7 @@ func (c *Client) applyStaticConfig(config Config) error {
 	logger.WithField("ip", ipNet.String()).Info("Configuring interface with IP")
 
 	// Get existing addresses to check for duplicates
-	existingAddrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	existingAddrs, err := m.networkMgr.ListAddresses(link)
 	if err != nil {
 		return fmt.Errorf("failed to list existing addresses: %w", err)
 	}
@@ -139,7 +131,7 @@ func (c *Client) applyStaticConfig(config Config) error {
 		// Remove existing IPv4 addresses that don't match our target
 		for _, addr := range existingAddrs {
 			if !addr.IPNet.IP.Equal(ipNet.IP) {
-				if err := netlink.AddrDel(link, &addr); err != nil {
+				if err := m.networkMgr.DeleteAddress(link, &addr); err != nil {
 					logger.WithError(err).WithField("address", addr.IPNet.String()).Warn("Failed to remove existing address")
 				} else {
 					logger.WithField("address", addr.IPNet.String()).Debug("Removed existing address")
@@ -153,7 +145,7 @@ func (c *Client) applyStaticConfig(config Config) error {
 		addr := &netlink.Addr{
 			IPNet: ipNet,
 		}
-		if err := netlink.AddrAdd(link, addr); err != nil {
+		if err := m.networkMgr.AddAddress(link, addr); err != nil {
 			return fmt.Errorf("failed to add IP address %s: %w", ipNet.String(), err)
 		}
 		logger.WithField("ip", ipNet.String()).Info("Successfully added IP address")
@@ -168,7 +160,7 @@ func (c *Client) applyStaticConfig(config Config) error {
 
 		logger.WithField("gateway", gateway.String()).Info("Setting default gateway")
 
-		if err := c.configureDefaultRoute(link, gateway); err != nil {
+		if err := m.configureDefaultRoute(ctx, link, gateway); err != nil {
 			return fmt.Errorf("failed to set default gateway: %w", err)
 		}
 	}
@@ -177,11 +169,11 @@ func (c *Client) applyStaticConfig(config Config) error {
 }
 
 // configureDefaultRoute configures the default gateway for the interface.
-func (c *Client) configureDefaultRoute(link netlink.Link, gateway net.IP) error {
-	logger := logging.WithComponentAndInterface("static", c.Iface.Name).WithField("gateway", gateway.String())
+func (m *Manager) configureDefaultRoute(ctx context.Context, link netlink.Link, gateway net.IP) error {
+	logger := logging.WithComponentAndInterface("static", m.iface.Name).WithField("gateway", gateway.String())
 
 	// Check if default route already exists with this gateway
-	routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
+	routes, err := m.networkMgr.ListRoutes()
 	if err != nil {
 		return fmt.Errorf("failed to list routes: %w", err)
 	}
@@ -197,7 +189,7 @@ func (c *Client) configureDefaultRoute(link netlink.Link, gateway net.IP) error 
 				break
 			} else {
 				// Remove conflicting default route
-				if err := netlink.RouteDel(&route); err != nil {
+				if err := m.networkMgr.DeleteRoute(&route); err != nil {
 					logger.WithError(err).WithField("existing_gateway", route.Gw.String()).
 						Warn("Failed to remove existing default route")
 				} else {
@@ -215,7 +207,7 @@ func (c *Client) configureDefaultRoute(link netlink.Link, gateway net.IP) error 
 			Gw:        gateway,
 		}
 
-		if err := netlink.RouteAdd(route); err != nil {
+		if err := m.networkMgr.AddRoute(route); err != nil {
 			// Check if the error is because the route already exists
 			if strings.Contains(err.Error(), "file exists") {
 				logger.WithField("gateway", gateway.String()).
@@ -232,50 +224,53 @@ func (c *Client) configureDefaultRoute(link netlink.Link, gateway net.IP) error 
 }
 
 // monitorInterface monitors the interface and reapplies configuration if needed.
-func (c *Client) monitorInterface(config Config) error {
-	logger := logging.WithComponentAndInterface("static", c.Iface.Name)
+func (m *Manager) monitorInterface(ctx context.Context, config types.StaticIPConfig) error {
+	logger := logging.WithComponentAndInterface("static", m.iface.Name)
 	logger.Info("Starting interface monitoring")
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if err := c.checkAndRepairConfiguration(config); err != nil {
-			logger.WithError(err).Error("Configuration check failed")
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Interface monitoring stopped due to context cancellation")
+			return ctx.Err()
+		case <-ticker.C:
+			if err := m.checkAndRepairConfiguration(ctx, config); err != nil {
+				logger.WithError(err).Error("Configuration check failed")
+			}
 		}
 	}
-
-	// This line is unreachable, but required for compilation
-	return nil
 }
 
 // checkAndRepairConfiguration checks if the static configuration is still applied and repairs if needed.
-func (c *Client) checkAndRepairConfiguration(config Config) error {
-	logger := logging.WithComponentAndInterface("static", c.Iface.Name)
+func (m *Manager) checkAndRepairConfiguration(ctx context.Context, config types.StaticIPConfig) error {
+	logger := logging.WithComponentAndInterface("static", m.iface.Name)
 
 	// Refresh interface information
-	iface, err := net.InterfaceByName(c.Iface.Name)
+	iface, err := net.InterfaceByName(m.iface.Name)
 	if err != nil {
-		return fmt.Errorf("interface %s not found: %w", c.Iface.Name, err)
+		return fmt.Errorf("interface %s not found: %w", m.iface.Name, err)
 	}
-	c.Iface = iface
+	m.iface = iface
 
-	// Get netlink interface
-	link, err := netlink.LinkByName(c.Iface.Name)
+	// Get netlink interface using network manager port
+	link, err := m.networkMgr.GetLinkByName(m.iface.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get netlink interface: %w", err)
 	}
 
 	// Check if interface is up
-	if c.Iface.Flags&net.FlagUp == 0 {
+	if m.iface.Flags&net.FlagUp == 0 {
 		logger.Warn("Interface is down, bringing it up")
-		if err := netlink.LinkSetUp(link); err != nil {
+		if err := m.networkMgr.SetLinkUp(link); err != nil {
 			return fmt.Errorf("failed to bring interface up: %w", err)
 		}
 	}
 
-	// Get current IP addresses using netlink
-	addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	// Get current IP addresses using network manager port
+	addrs, err := m.networkMgr.ListAddresses(link)
 	if err != nil {
 		return fmt.Errorf("failed to get interface addresses: %w", err)
 	}
@@ -295,7 +290,7 @@ func (c *Client) checkAndRepairConfiguration(config Config) error {
 	if !hasStaticIP {
 		logger.WithField("ip", config.IPAddress).
 			Warn("Static IP not found on interface, reapplying configuration")
-		if err := c.applyStaticConfig(config); err != nil {
+		if err := m.applyStaticConfig(ctx, config); err != nil {
 			return fmt.Errorf("failed to reapply static configuration: %w", err)
 		}
 		logger.Info("Static configuration reapplied successfully")
